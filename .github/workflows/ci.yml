@@ -39,4 +39,10 @@ jobs:
         env:
           CODEX_DISPATCHER_DRY_RUN: "true"
         run: |
-          codex-dispatcher --ticket-file examples/ticket.valid.json --allowlist acme/demo --repository acme/demo
+          # allowlist+repo without policies must BLOCK
+          if codex-dispatcher --ticket-file examples/ticket.valid.json --allowlist acme/demo --repository acme/demo; then
+            echo "expected blocked without policies" >&2
+            exit 1
+          fi
+          # demo-eligible path requires explicit --demo-pass-policies
+          codex-dispatcher --ticket-file examples/ticket.valid.json --allowlist acme/demo --repository acme/demo --demo-pass-policies

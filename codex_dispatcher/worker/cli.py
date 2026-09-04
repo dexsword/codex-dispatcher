@@ -20,7 +20,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Dry-run Codex Dispatcher assess. "
-            "Use offline --ticket-file examples with an explicitly supplied --allowlist."
+            "Offline --ticket-file examples require --allowlist, --repository, "
+            "and either real injected policy flags or --demo-pass-policies."
         )
     )
     parser.add_argument(
@@ -32,13 +33,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repository",
         default=None,
-        help="owner/name checked against --allowlist when provided",
+        help="owner/name target repository (required for eligibility)",
     )
     parser.add_argument(
         "--allowlist",
         action="append",
         default=[],
-        help="allowed owner/name (repeatable). Required; absent allowlist fails closed.",
+        help="allowed owner/name (repeatable). Must be nonempty for eligibility.",
+    )
+    parser.add_argument(
+        "--demo-pass-policies",
+        action="store_true",
+        help=(
+            "UNMISTAKABLE offline demo only: inject pass-through validator/safety/"
+            "duplicate-check policies. Allowlist alone never synthesizes policies."
+        ),
     )
     parser.add_argument(
         "--require-key",
@@ -90,40 +99,58 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
             "issues_processed": 1,
         }
 
-    # Fail closed: without an explicit allowlist, do not inject any seams.
-    if not args.allowlist:
-        result = assess(issue, ticket)
-        result["issues_processed"] = 1
-        return result
-
+    allowlist = frozenset(args.allowlist) if args.allowlist else None
     require_keys = list(args.require_keys)
     deny_keys = list(args.deny_keys)
     known = {str(x) for x in args.known_ids}
     id_field = args.id_field
+    demo = bool(args.demo_pass_policies)
 
-    def _validate(t: Mapping[str, Any]) -> None:
-        missing = [k for k in require_keys if k not in t]
-        if missing:
-            raise TicketValidationError(f"missing required ticket keys: {missing}")
+    # Fail closed: do NOT synthesize policies from --allowlist alone.
+    validate_ticket = None
+    safety_policy = None
+    duplicate_check = None
 
-    def _safe(t: Mapping[str, Any]) -> None:
-        hit = [k for k in deny_keys if k in t]
-        if hit:
-            raise SafetyViolation(f"ticket contains denied keys: {hit}")
+    if demo or require_keys:
 
-    def _dup(t: Mapping[str, Any]) -> bool:
-        value = t.get(id_field)
-        return value is not None and str(value) in known
+        def _validate(t: Mapping[str, Any]) -> None:
+            missing = [k for k in require_keys if k not in t]
+            if missing:
+                raise TicketValidationError(f"missing required ticket keys: {missing}")
+
+        validate_ticket = CallableTicketValidator(_validate)
+
+    if demo or deny_keys:
+
+        def _safe(t: Mapping[str, Any]) -> None:
+            hit = [k for k in deny_keys if k in t]
+            if hit:
+                raise SafetyViolation(f"ticket contains denied keys: {hit}")
+
+        safety_policy = CallableSafetyPolicy(_safe)
+
+    # Duplicate-check only when demo pass-through OR --known-id was used.
+    if demo or bool(args.known_ids):
+
+        def _dup(t: Mapping[str, Any]) -> bool:
+            value = t.get(id_field)
+            return value is not None and str(value) in known
+
+        duplicate_check = CallableDuplicateChecker(_dup)
 
     result = assess(
         issue,
         ticket,
-        validate_ticket=CallableTicketValidator(_validate),
-        safety_policy=CallableSafetyPolicy(_safe),
-        duplicate_check=CallableDuplicateChecker(_dup),
-        repository_allowlist=frozenset(args.allowlist),
+        validate_ticket=validate_ticket,
+        safety_policy=safety_policy,
+        duplicate_check=duplicate_check,
+        repository_allowlist=allowlist,
         repository=args.repository,
+        demo_pass_policies=demo,
     )
+    if demo:
+        result["demo_pass_policies"] = True
+        result["policy_mode"] = "demo-pass-policies"
     result["issues_processed"] = 1
     return result
 

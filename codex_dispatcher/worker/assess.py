@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Set, Mapping
+from collections.abc import Mapping, Set
 from typing import Any
 
 from codex_dispatcher.github.source import Issue
@@ -40,8 +40,8 @@ def _blocked(issue: Issue | None, reason: str) -> dict[str, Any]:
     return result
 
 
-def _eligible(issue: Issue) -> dict[str, Any]:
-    return {
+def _eligible(issue: Issue, *, demo_pass_policies: bool = False) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "mode": "dry-run",
         "issue": issue.number,
         "disposition": "eligible",
@@ -57,6 +57,10 @@ def _eligible(issue: Issue) -> dict[str, Any]:
         "agent_invoked": False,
         "ledger_mutated": False,
     }
+    if demo_pass_policies:
+        result["demo_pass_policies"] = True
+        result["policy_mode"] = "demo-pass-policies"
+    return result
 
 
 def assess(
@@ -68,10 +72,12 @@ def assess(
     duplicate_check: DuplicateChecker | None = None,
     repository_allowlist: Set[str] | None = None,
     repository: str | None = None,
+    demo_pass_policies: bool = False,
 ) -> dict[str, Any]:
     """Assess an opaque ticket under injected policies.
 
     Any missing seam fails closed (disposition blocked, never eligible).
+    Allowlist must be nonempty and a target repository must be named and listed.
     The dispatcher does not interpret product fields inside *ticket*.
     """
     if validate_ticket is None:
@@ -82,7 +88,11 @@ def assess(
         return _blocked(issue, "duplicate-check capability is not configured")
     if repository_allowlist is None:
         return _blocked(issue, "repository allowlist is not configured")
-    if repository is not None and repository not in repository_allowlist:
+    if len(repository_allowlist) == 0:
+        return _blocked(issue, "repository allowlist is empty")
+    if repository is None or str(repository).strip() == "":
+        return _blocked(issue, "target repository is not supplied")
+    if repository not in repository_allowlist:
         return _blocked(
             issue,
             f"repository is not in the supplied allowlist: {repository}",
@@ -98,4 +108,4 @@ def assess(
     except (TicketValidationError, SafetyViolation, ValueError, TypeError, KeyError) as exc:
         return _blocked(issue, str(exc))
 
-    return _eligible(issue)
+    return _eligible(issue, demo_pass_policies=demo_pass_policies)

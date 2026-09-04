@@ -19,6 +19,14 @@ def _issue() -> Issue:
     return Issue(7, "t", "{}", "https://example.test/issues/7")
 
 
+def _pass_policies() -> dict:
+    return {
+        "validate_ticket": CallableTicketValidator(lambda _t: None),
+        "safety_policy": CallableSafetyPolicy(lambda _t: None),
+        "duplicate_check": CallableDuplicateChecker(lambda _t: False),
+    }
+
+
 class AssessFailClosedTests(unittest.TestCase):
     def test_missing_all_policies_blocked(self) -> None:
         result = assess(_issue(), {"id": "x"})
@@ -46,6 +54,7 @@ class AssessFailClosedTests(unittest.TestCase):
             validate_ticket=CallableTicketValidator(lambda _t: None),
             safety_policy=CallableSafetyPolicy(lambda _t: None),
             repository_allowlist=frozenset({"acme/demo"}),
+            repository="acme/demo",
         )
         self.assertEqual(result["disposition"], "blocked")
         self.assertIn("duplicate-check", result["reason"])
@@ -54,20 +63,59 @@ class AssessFailClosedTests(unittest.TestCase):
         result = assess(
             _issue(),
             {"id": "x"},
-            validate_ticket=CallableTicketValidator(lambda _t: None),
-            safety_policy=CallableSafetyPolicy(lambda _t: None),
-            duplicate_check=CallableDuplicateChecker(lambda _t: False),
+            **_pass_policies(),
         )
         self.assertEqual(result["disposition"], "blocked")
         self.assertIn("allowlist", result["reason"])
 
-    def test_explicit_eligible(self) -> None:
+    def test_empty_allowlist_blocked(self) -> None:
+        result = assess(
+            _issue(),
+            {"id": "x"},
+            **_pass_policies(),
+            repository_allowlist=frozenset(),
+            repository="acme/demo",
+        )
+        self.assertEqual(result["disposition"], "blocked")
+        self.assertIn("empty", result["reason"])
+
+    def test_allowlist_without_repository_blocked(self) -> None:
+        result = assess(
+            _issue(),
+            {"id": "x"},
+            **_pass_policies(),
+            repository_allowlist=frozenset({"acme/demo"}),
+            repository=None,
+        )
+        self.assertEqual(result["disposition"], "blocked")
+        self.assertIn("repository", result["reason"].lower())
+
+    def test_repository_without_allowlist_blocked(self) -> None:
+        result = assess(
+            _issue(),
+            {"id": "x"},
+            **_pass_policies(),
+            repository_allowlist=None,
+            repository="acme/demo",
+        )
+        self.assertEqual(result["disposition"], "blocked")
+        self.assertIn("allowlist", result["reason"])
+
+    def test_allowlist_and_repository_without_policies_blocked(self) -> None:
+        result = assess(
+            _issue(),
+            {"id": "x"},
+            repository_allowlist=frozenset({"acme/demo"}),
+            repository="acme/demo",
+        )
+        self.assertEqual(result["disposition"], "blocked")
+        self.assertIn("ticket validation", result["reason"])
+
+    def test_explicit_policies_and_repo_in_allowlist_eligible(self) -> None:
         result = assess(
             _issue(),
             {"id": "ok", "summary": "fine"},
-            validate_ticket=CallableTicketValidator(lambda _t: None),
-            safety_policy=CallableSafetyPolicy(lambda _t: None),
-            duplicate_check=CallableDuplicateChecker(lambda _t: False),
+            **_pass_policies(),
             repository_allowlist=frozenset({"acme/demo"}),
             repository="acme/demo",
         )
@@ -124,9 +172,7 @@ class AssessFailClosedTests(unittest.TestCase):
         result = assess(
             _issue(),
             {"id": "x"},
-            validate_ticket=CallableTicketValidator(lambda _t: None),
-            safety_policy=CallableSafetyPolicy(lambda _t: None),
-            duplicate_check=CallableDuplicateChecker(lambda _t: False),
+            **_pass_policies(),
             repository_allowlist=frozenset({"acme/demo"}),
             repository="other/repo",
         )
@@ -144,7 +190,6 @@ class DryRunEnvTests(unittest.TestCase):
             require_dry_run(env={"CODEX_DISPATCHER_DRY_RUN": "false"})
 
     def test_does_not_read_orchestrator_env(self) -> None:
-        # ORCHESTRATOR_DRY_RUN=false must not affect us when CODEX flag is true/default.
         require_dry_run(
             env={
                 "ORCHESTRATOR_DRY_RUN": "false",
