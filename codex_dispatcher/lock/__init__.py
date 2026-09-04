@@ -1,1 +1,4 @@
-"""Process exclusion API stubs (future port/refactor; no ProcessLock semantic change in CopyMoney)."""
+"""Lock seam reserved for Task D.
+
+Task C does not implement or alter ProcessLock semantics.
+"""
