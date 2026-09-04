@@ -8,6 +8,7 @@ import unittest
 
 SEAM_MODULES = (
     "codex_dispatcher",
+    "codex_dispatcher.allowlist",
     "codex_dispatcher.github",
     "codex_dispatcher.lock",
     "codex_dispatcher.ledger",
@@ -28,7 +29,7 @@ class ImportSmokeTests(unittest.TestCase):
     def test_package_version(self) -> None:
         import codex_dispatcher
 
-        self.assertEqual(codex_dispatcher.__version__, "0.1.0")
+        self.assertEqual(codex_dispatcher.__version__, "0.2.0")
 
 
 if __name__ == "__main__":

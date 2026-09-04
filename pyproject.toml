@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-dispatcher"
-version = "0.1.0"
+version = "0.2.0"
 description = "Generic Codex Dispatcher (dry-run ticket extract + assess; no activation)."
 readme = "README.md"
 requires-python = ">=3.10"
