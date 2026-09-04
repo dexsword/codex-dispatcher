@@ -1,26 +1,49 @@
-"""Injectable safety policy seam (fail closed when absent)."""
+"""Injectable safety policy seam (fail closed when absent).
+
+Generic rule engine + DenyAll. No product path tables. No silent-allow
+CallableSafetyPolicy. CopyMoney/live-trading parity is deferred to a facade.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any, Protocol, runtime_checkable
+from codex_dispatcher.safety.codes import (
+    ACTION_PROHIBITED,
+    CONFIG_INVALID,
+    PATH_DENIED,
+    PATH_ESCAPE,
+    PATH_PROTECTED,
+    PATH_UNEXPECTED,
+    POLICY_DENY_ALL,
+)
+from codex_dispatcher.safety.config import ActionRule, PathRule, SafetyRuleConfig
+from codex_dispatcher.safety.deny_all import DenyAllSafetyPolicy
+from codex_dispatcher.safety.engine import (
+    MappingTicketSafetySurface,
+    RuleBasedSafetyPolicy,
+    SafetyPolicy,
+    SafetyViolation,
+    SafetyViolationDetail,
+    TicketSafetySurface,
+)
+from codex_dispatcher.safety.normalize import normalize_path
 
-
-class SafetyViolation(Exception):
-    """Ticket failed an injected safety policy."""
-
-
-@runtime_checkable
-class SafetyPolicy(Protocol):
-    def require_safe(self, ticket: Mapping[str, Any]) -> None:
-        """Raise SafetyViolation (or ValueError) if the opaque ticket is unsafe."""
-
-
-class CallableSafetyPolicy:
-    """Adapt a plain callable into a SafetyPolicy."""
-
-    def __init__(self, fn: Callable[[Mapping[str, Any]], None]) -> None:
-        self._fn = fn
-
-    def require_safe(self, ticket: Mapping[str, Any]) -> None:
-        self._fn(ticket)
+__all__ = [
+    "ACTION_PROHIBITED",
+    "CONFIG_INVALID",
+    "PATH_DENIED",
+    "PATH_ESCAPE",
+    "PATH_PROTECTED",
+    "PATH_UNEXPECTED",
+    "POLICY_DENY_ALL",
+    "ActionRule",
+    "DenyAllSafetyPolicy",
+    "MappingTicketSafetySurface",
+    "PathRule",
+    "RuleBasedSafetyPolicy",
+    "SafetyPolicy",
+    "SafetyRuleConfig",
+    "SafetyViolation",
+    "SafetyViolationDetail",
+    "TicketSafetySurface",
+    "normalize_path",
+]

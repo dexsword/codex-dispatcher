@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    name: install + smoke + firewall + assess
+    name: install + smoke + firewall + assess + safety
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,7 +32,7 @@ jobs:
           print("dependencies = [] OK")
           PY
 
-      - name: Unit tests (smoke, firewall, extract, assess, GET-only, CLI)
+      - name: Unit tests (smoke, firewall, extract, assess, safety matrix, GET-only, CLI)
         run: python -m unittest discover -s tests -v
 
       - name: Offline CLI dry-run smoke
