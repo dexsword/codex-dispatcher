@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: install + smoke + firewall
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package (zero runtime deps)
+        run: python -m pip install -e .
+
+      - name: Assert no runtime dependencies declared
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          deps = data["project"].get("dependencies") or []
+          assert deps == [], f"runtime dependencies must be empty, got {deps!r}"
+          print("dependencies = [] OK")
+          PY
+
+      - name: Import smoke + dependency firewall
+        run: python -m unittest discover -s tests -v
