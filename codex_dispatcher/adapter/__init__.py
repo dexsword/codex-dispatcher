@@ -1,1 +1,1 @@
-"""Coding agent adapter stubs (future; disabled-by-default / dry-run posture)."""
+"""Coding agent adapter stubs (disabled / future; not Task C)."""

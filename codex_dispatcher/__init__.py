@@ -1,6 +1,6 @@
-"""Inert Codex Dispatcher package skeleton (Task B).
+"""Generic Codex Dispatcher (dry-run extract + assess).
 
-No runtime behavior. Subpackages are stubs only.
+Task C: port/refactor — not a wholesale CopyMoney copy.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
