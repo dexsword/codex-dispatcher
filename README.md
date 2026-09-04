@@ -13,7 +13,7 @@ Port/refactor reusable dry-run orchestration seams out of [`dexsword/copymoney`]
 - **Opaque tickets:** after unambiguous JSON-object extraction, eligibility comes only from injected validators/policies.
 - **GitHub GET-only** issue retrieval. No mutation methods. No generic request-method escape hatch.
 - **Ledger seam:** read-only duplicate-check interface only (no append / filesystem mutation).
-- **No ProcessLock** in this package yet (Task D / F). Lock stub is intentionally empty of ProcessLock.
+- **Lock paths are injectable** (Task D) with **no defaults** into `/run/lock/copymoney-paired-capture/`. This package does **not** implement CopyMoney `ProcessLock` semantics (Task F is Will-gated).
 - **No PR #20 / paired-shadow work.** Do not edit `dexsword/copymoney` from this repo’s tasks.
 - **No deploy, secrets, wallets, adapter enablement, or live trading hooks.**
 
@@ -61,6 +61,30 @@ codex-dispatcher \
 ```
 
 Do not rely on hardcoded product allowlists. Supply allowlists explicitly. Prefer real policy injection over `--demo-pass-policies` outside demos.
+
+## Allowlist + lock paths (Task D)
+
+- **Allowlist:** injectable and **nonempty**. Missing/empty allowlist fails closed in `GitHubIssueSource`, `AdapterConfig`, and `assess()`.
+- **No hardcoded** `dexsword/copymoney` inside the generic package — product facades inject their allowlist.
+- **Lock paths:** inject `LockPathConfig(global_agent_lock=..., implementation_lock=...)`. There are **no** built-in defaults. Paths under `/run/lock/copymoney-paired-capture/` are rejected.
+- **Scotty / ops invariant:** a later CopyMoney facade that wires lock paths must **not** loosen fail-closed lock-path equality (product defaults stay exact; dispatcher must not silently accept alternate paths). Keep dispatcher locks path-disjoint from PR #20 paired-capture locks.
+
+Example (library injection — not activation):
+
+```python
+from pathlib import Path
+from codex_dispatcher.adapter import AdapterConfig
+from codex_dispatcher.lock import LockPathConfig
+
+cfg = AdapterConfig(
+    allowed_repositories=frozenset({"dexsword/copymoney"}),
+    lock_paths=LockPathConfig(
+        global_agent_lock=Path("/run/lock/copymoney-agent.lock"),
+        implementation_lock=Path("/run/lock/copymoney-agent-implementation.lock"),
+    ),
+)
+```
+
 ## Package layout
 
 ```
@@ -70,8 +94,9 @@ codex_dispatcher/
   safety/   # SafetyPolicy protocol
   ledger/   # DuplicateChecker only
   schema/   # opaque ticket object helper
-  lock/     # reserved (no ProcessLock here)
-  adapter/  # reserved (disabled / future)
+  lock/     # LockPathConfig injection (no ProcessLock semantics)
+  adapter/  # AdapterConfig + disabled CodingAgentAdapter
+  allowlist.py  # nonempty allowlist helpers
 ```
 
 ## Dependency firewall

@@ -6,9 +6,15 @@ import json
 import re
 import urllib.parse
 import urllib.request
-from collections.abc import Set, Mapping
+from collections.abc import Mapping, Set
 from dataclasses import dataclass
 from typing import Any
+
+from codex_dispatcher.allowlist import (
+    AllowlistError,
+    require_nonempty_allowlist,
+    require_repository_allowed,
+)
 
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -33,7 +39,7 @@ class GitHubIssueSource:
     """Fetch open issues via GET only.
 
     Mutation APIs intentionally do not exist. There is no generic
-    request(method=...) helper.
+    request(method=...) helper. Repository allowlist is required and nonempty.
     """
 
     def __init__(
@@ -47,18 +53,13 @@ class GitHubIssueSource:
     ) -> None:
         if not re.fullmatch(r"[^/\s]+/[^/\s]+", repository):
             raise ValueError("repository must be owner/name")
-        if allowed_repositories is None:
-            raise ValueError(
-                "repository allowlist is required (fail closed); "
-                "pass allowed_repositories explicitly"
-            )
-        if repository not in allowed_repositories:
-            raise ValueError(f"repository is not in the supplied allowlist: {repository}")
+        allowlist = require_nonempty_allowlist(allowed_repositories)
+        require_repository_allowed(repository, allowlist)
         if api_base != GITHUB_API_BASE:
             raise ValueError(f"api_base must be pinned to {GITHUB_API_BASE}")
         self.repository = repository
         self.token = token
-        self.allowed_repositories = frozenset(allowed_repositories)
+        self.allowed_repositories = allowlist
         self.api_base = api_base
         self.ready_label = ready_label
 

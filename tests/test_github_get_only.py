@@ -7,17 +7,26 @@ import unittest
 from io import BytesIO
 from unittest import mock
 
+from codex_dispatcher.allowlist import AllowlistError
 from codex_dispatcher.github.source import GitHubIssueSource, _get_json
 
 
 class GitHubGetOnlyTests(unittest.TestCase):
     def test_allowlist_required(self) -> None:
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(AllowlistError) as ctx:
             GitHubIssueSource("acme/demo", token=None)
         self.assertIn("allowlist", str(ctx.exception).lower())
 
+    def test_empty_allowlist_rejected(self) -> None:
+        with self.assertRaises(AllowlistError):
+            GitHubIssueSource(
+                "acme/demo",
+                token=None,
+                allowed_repositories=frozenset(),
+            )
+
     def test_repo_must_be_allowlisted(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AllowlistError):
             GitHubIssueSource(
                 "acme/demo",
                 token=None,
