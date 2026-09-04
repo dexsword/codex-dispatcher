@@ -8,7 +8,7 @@ from typing import Any
 
 from codex_dispatcher.github.source import Issue
 from codex_dispatcher.ledger import DuplicateChecker
-from codex_dispatcher.safety import SafetyPolicy, SafetyViolation
+from codex_dispatcher.safety import SafetyPolicy, SafetyViolation, TicketSafetySurface
 from codex_dispatcher.worker.policies import TicketValidationError, TicketValidator
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -69,6 +69,7 @@ def assess(
     *,
     validate_ticket: TicketValidator | None = None,
     safety_policy: SafetyPolicy | None = None,
+    ticket_safety_surface: TicketSafetySurface | None = None,
     duplicate_check: DuplicateChecker | None = None,
     repository_allowlist: Set[str] | None = None,
     repository: str | None = None,
@@ -84,6 +85,8 @@ def assess(
         return _blocked(issue, "ticket validation policy is not configured")
     if safety_policy is None:
         return _blocked(issue, "safety policy is not configured")
+    if ticket_safety_surface is None:
+        return _blocked(issue, "ticket safety surface is not configured")
     if duplicate_check is None:
         return _blocked(issue, "duplicate-check capability is not configured")
     if repository_allowlist is None:
@@ -100,9 +103,11 @@ def assess(
 
     try:
         validate_ticket.validate(ticket)
-        safety_policy.require_safe(ticket)
+        paths = ticket_safety_surface.paths(ticket)
+        texts = ticket_safety_surface.texts(ticket)
+        safety_policy.require_safe_ticket(paths=paths, texts=texts)
         if duplicate_check.is_duplicate(ticket):
-            raise SafetyViolation(
+            raise ValueError(
                 "ticket identity already known to duplicate-check; silent repetition refused"
             )
     except (TicketValidationError, SafetyViolation, ValueError, TypeError, KeyError) as exc:

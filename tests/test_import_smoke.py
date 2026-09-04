@@ -29,7 +29,7 @@ class ImportSmokeTests(unittest.TestCase):
     def test_package_version(self) -> None:
         import codex_dispatcher
 
-        self.assertEqual(codex_dispatcher.__version__, "0.2.0")
+        self.assertEqual(codex_dispatcher.__version__, "0.3.0")
 
 
 if __name__ == "__main__":

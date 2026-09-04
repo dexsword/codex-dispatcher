@@ -11,9 +11,24 @@ from typing import Any
 
 from codex_dispatcher.github import Issue, extract_ticket
 from codex_dispatcher.ledger import CallableDuplicateChecker
-from codex_dispatcher.safety import CallableSafetyPolicy, SafetyViolation
+from codex_dispatcher.safety import (
+    MappingTicketSafetySurface,
+    RuleBasedSafetyPolicy,
+    SafetyRuleConfig,
+)
 from codex_dispatcher.worker.assess import assess, require_dry_run
 from codex_dispatcher.worker.policies import CallableTicketValidator, TicketValidationError
+
+
+def _empty_rule_policy() -> RuleBasedSafetyPolicy:
+    """Structural-only RuleBased policy (empty tuples). Demo/scaffold inject only."""
+    return RuleBasedSafetyPolicy(
+        SafetyRuleConfig(
+            denied_paths=(),
+            protected_paths=(),
+            prohibited_actions=(),
+        )
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,8 +60,10 @@ def _parser() -> argparse.ArgumentParser:
         "--demo-pass-policies",
         action="store_true",
         help=(
-            "UNMISTAKABLE offline demo only: inject pass-through validator/safety/"
-            "duplicate-check policies. Allowlist alone never synthesizes policies."
+            "UNMISTAKABLE offline demo only: inject empty RuleBasedSafetyPolicy + "
+            "synthetic surface + pass-through validator/duplicate-check. "
+            "Allowlist alone never synthesizes policies. Empty config is structural "
+            "only — not a production-safe product policy."
         ),
     )
     parser.add_argument(
@@ -61,7 +78,7 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         dest="deny_keys",
-        help="injected safety policy: block if opaque key is present (repeatable)",
+        help="injected ticket validator: block if opaque key is present (repeatable)",
     )
     parser.add_argument(
         "--known-id",
@@ -109,25 +126,26 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
     # Fail closed: do NOT synthesize policies from --allowlist alone.
     validate_ticket = None
     safety_policy = None
+    ticket_safety_surface = None
     duplicate_check = None
 
-    if demo or require_keys:
+    # Any of demo / require-key / deny-key means policies are being configured.
+    # Inject empty RuleBased + surface so eligible can happen (structural only).
+    policy_flags = demo or bool(require_keys) or bool(deny_keys)
+
+    if policy_flags:
 
         def _validate(t: Mapping[str, Any]) -> None:
             missing = [k for k in require_keys if k not in t]
             if missing:
                 raise TicketValidationError(f"missing required ticket keys: {missing}")
-
-        validate_ticket = CallableTicketValidator(_validate)
-
-    if demo or deny_keys:
-
-        def _safe(t: Mapping[str, Any]) -> None:
             hit = [k for k in deny_keys if k in t]
             if hit:
-                raise SafetyViolation(f"ticket contains denied keys: {hit}")
+                raise TicketValidationError(f"ticket contains denied keys: {hit}")
 
-        safety_policy = CallableSafetyPolicy(_safe)
+        validate_ticket = CallableTicketValidator(_validate)
+        safety_policy = _empty_rule_policy()
+        ticket_safety_surface = MappingTicketSafetySurface()
 
     # Duplicate-check only when demo pass-through OR --known-id was used.
     if demo or bool(args.known_ids):
@@ -143,6 +161,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         ticket,
         validate_ticket=validate_ticket,
         safety_policy=safety_policy,
+        ticket_safety_surface=ticket_safety_surface,
         duplicate_check=duplicate_check,
         repository_allowlist=allowlist,
         repository=args.repository,

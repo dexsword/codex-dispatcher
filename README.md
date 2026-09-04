@@ -9,7 +9,7 @@ Port/refactor reusable dry-run orchestration seams out of [`dexsword/copymoney`]
 ## Posture (hard)
 
 - **Dry-run only** via `CODEX_DISPATCHER_DRY_RUN` (default `true`). Non-dry-run is refused.
-- **Fail closed:** missing ticket validator, safety policy, repository allowlist, or duplicate-check → `blocked` (never `eligible`).
+- **Fail closed:** missing ticket validator, safety policy, ticket safety surface, repository allowlist, or duplicate-check → `blocked` (never `eligible`). `None` safety is never substituted with DenyAll or empty rules.
 - **Opaque tickets:** after unambiguous JSON-object extraction, eligibility comes only from injected validators/policies.
 - **GitHub GET-only** issue retrieval. No mutation methods. No generic request-method escape hatch.
 - **Ledger seam:** read-only duplicate-check interface only (no append / filesystem mutation).
@@ -85,13 +85,50 @@ cfg = AdapterConfig(
 )
 ```
 
+
+## SafetyPolicy engine (Task E)
+
+Generic, fail-closed safety seam with **immutable injected** `SafetyRuleConfig` only.
+
+**Acceptance posture (locked phrases):**
+
+1. Injected synthetic policy produces exact expected decisions and stable violation codes.
+2. The generic engine propagates every injected prohibited-action rule without bypass.
+3. CopyMoney/live-trading parity is explicitly deferred to the CopyMoney facade integration.
+
+**Package layout:**
+
+```
+codex_dispatcher/safety/
+  __init__.py   # exports
+  codes.py      # POLICY_DENY_ALL, PATH_*, ACTION_PROHIBITED, CONFIG_INVALID
+  config.py     # PathRule, ActionRule, SafetyRuleConfig (no bypass fields)
+  deny_all.py   # DenyAllSafetyPolicy (explicit inject only)
+  engine.py     # RuleBasedSafetyPolicy + SafetyViolation + protocols
+  normalize.py  # relative-path normalize; absolute / `..` → PATH_ESCAPE
+```
+
+**Behaviors:**
+
+- `assess(..., safety_policy=None)` → blocked *"safety policy is not configured"* (Task C preserved; no auto-DenyAll).
+- Missing `ticket_safety_surface` when a policy is present → blocked.
+- `DenyAllSafetyPolicy` always raises `POLICY_DENY_ALL` on ticket and diff checks.
+- `RuleBasedSafetyPolicy` collects **all** matching violations before raise; empty config = structural checks only (escape + unexpected), **not** a production-safe product default.
+- Empty regex `pattern` → `CONFIG_INVALID` at construction.
+- Public `CallableSafetyPolicy` removed (F11 — no silent-allow adapter).
+- Diff validation (`validate_candidate_diff`) is exported for future candidate pipelines; dry-run `assess` does **not** call it.
+
+**Worf F1–F13 (summary):** no bypass/skip/unsafe/permissive/allow_all; no None→allow; no auto-DenyAll on omit; no skipped ActionRules; no ticket-prose-as-diff; no CopyMoney/trading patterns in-tree; no adapter/mutation; no mutable registries; no soft-fail; no empty-config-as-safe production docs; no public silent-allow CallableSafetyPolicy; normalize-before-unexpected; empty pattern → CONFIG_INVALID.
+
+Synthetic matrix tests live under `tests/safety/` (neutral names only).
+
 ## Package layout
 
 ```
 codex_dispatcher/
   github/   # extract_ticket + GET-only GitHubIssueSource
   worker/   # dry-run assess + CLI
-  safety/   # SafetyPolicy protocol
+  safety/   # SafetyPolicy engine (codes, config, DenyAll, RuleBased, normalize)
   ledger/   # DuplicateChecker only
   schema/   # opaque ticket object helper
   lock/     # LockPathConfig injection (no ProcessLock semantics)

@@ -10,7 +10,13 @@ from unittest import mock
 
 from codex_dispatcher.github import Issue
 from codex_dispatcher.ledger import CallableDuplicateChecker
-from codex_dispatcher.safety import CallableSafetyPolicy, SafetyViolation
+from codex_dispatcher.safety import (
+    DenyAllSafetyPolicy,
+    MappingTicketSafetySurface,
+    RuleBasedSafetyPolicy,
+    SafetyRuleConfig,
+    SafetyViolation,
+)
 from codex_dispatcher.worker import assess, require_dry_run
 from codex_dispatcher.worker.policies import CallableTicketValidator, TicketValidationError
 
@@ -19,10 +25,21 @@ def _issue() -> Issue:
     return Issue(7, "t", "{}", "https://example.test/issues/7")
 
 
+def _empty_policy() -> RuleBasedSafetyPolicy:
+    return RuleBasedSafetyPolicy(
+        SafetyRuleConfig(
+            denied_paths=(),
+            protected_paths=(),
+            prohibited_actions=(),
+        )
+    )
+
+
 def _pass_policies() -> dict:
     return {
         "validate_ticket": CallableTicketValidator(lambda _t: None),
-        "safety_policy": CallableSafetyPolicy(lambda _t: None),
+        "safety_policy": _empty_policy(),
+        "ticket_safety_surface": MappingTicketSafetySurface(),
         "duplicate_check": CallableDuplicateChecker(lambda _t: False),
     }
 
@@ -47,12 +64,26 @@ class AssessFailClosedTests(unittest.TestCase):
         self.assertEqual(result["disposition"], "blocked")
         self.assertIn("safety policy", result["reason"])
 
+    def test_missing_surface_blocked(self) -> None:
+        result = assess(
+            _issue(),
+            {"id": "x"},
+            validate_ticket=CallableTicketValidator(lambda _t: None),
+            safety_policy=_empty_policy(),
+            duplicate_check=CallableDuplicateChecker(lambda _t: False),
+            repository_allowlist=frozenset({"acme/demo"}),
+            repository="acme/demo",
+        )
+        self.assertEqual(result["disposition"], "blocked")
+        self.assertIn("ticket safety surface", result["reason"])
+
     def test_missing_duplicate_check_blocked(self) -> None:
         result = assess(
             _issue(),
             {"id": "x"},
             validate_ticket=CallableTicketValidator(lambda _t: None),
-            safety_policy=CallableSafetyPolicy(lambda _t: None),
+            safety_policy=_empty_policy(),
+            ticket_safety_surface=MappingTicketSafetySurface(),
             repository_allowlist=frozenset({"acme/demo"}),
             repository="acme/demo",
         )
@@ -131,7 +162,8 @@ class AssessFailClosedTests(unittest.TestCase):
             _issue(),
             {"id": "x"},
             validate_ticket=CallableTicketValidator(_bad),
-            safety_policy=CallableSafetyPolicy(lambda _t: None),
+            safety_policy=_empty_policy(),
+            ticket_safety_surface=MappingTicketSafetySurface(),
             duplicate_check=CallableDuplicateChecker(lambda _t: False),
             repository_allowlist=frozenset({"acme/demo"}),
             repository="acme/demo",
@@ -140,27 +172,30 @@ class AssessFailClosedTests(unittest.TestCase):
         self.assertEqual(result["reason"], "nope")
 
     def test_explicit_safety_blocked(self) -> None:
-        def _unsafe(ticket: Mapping[str, Any]) -> None:
-            raise SafetyViolation("unsafe")
-
         result = assess(
             _issue(),
             {"id": "x"},
             validate_ticket=CallableTicketValidator(lambda _t: None),
-            safety_policy=CallableSafetyPolicy(_unsafe),
+            safety_policy=DenyAllSafetyPolicy(),
+            ticket_safety_surface=MappingTicketSafetySurface(),
             duplicate_check=CallableDuplicateChecker(lambda _t: False),
             repository_allowlist=frozenset({"acme/demo"}),
             repository="acme/demo",
         )
         self.assertEqual(result["disposition"], "blocked")
-        self.assertEqual(result["reason"], "unsafe")
+        self.assertIsInstance(result["reason"], str)
+        # DenyAll raises SafetyViolation; assess keeps blocked disposition.
+        with self.assertRaises(SafetyViolation) as ctx:
+            DenyAllSafetyPolicy().require_safe_ticket(paths=[], texts=[])
+        self.assertEqual(ctx.exception.codes, ("POLICY_DENY_ALL",))
 
     def test_duplicate_blocked(self) -> None:
         result = assess(
             _issue(),
             {"id": "dup"},
             validate_ticket=CallableTicketValidator(lambda _t: None),
-            safety_policy=CallableSafetyPolicy(lambda _t: None),
+            safety_policy=_empty_policy(),
+            ticket_safety_surface=MappingTicketSafetySurface(),
             duplicate_check=CallableDuplicateChecker(lambda t: t.get("id") == "dup"),
             repository_allowlist=frozenset({"acme/demo"}),
             repository="acme/demo",
@@ -178,6 +213,11 @@ class AssessFailClosedTests(unittest.TestCase):
         )
         self.assertEqual(result["disposition"], "blocked")
         self.assertIn("allowlist", result["reason"])
+
+    def test_no_callable_safety_policy_export(self) -> None:
+        import codex_dispatcher.safety as safety_mod
+
+        self.assertFalse(hasattr(safety_mod, "CallableSafetyPolicy"))
 
 
 class DryRunEnvTests(unittest.TestCase):
