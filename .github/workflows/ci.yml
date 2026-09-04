@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    name: install + smoke + firewall
+    name: install + smoke + firewall + assess
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,5 +32,17 @@ jobs:
           print("dependencies = [] OK")
           PY
 
-      - name: Import smoke + dependency firewall
+      - name: Unit tests (smoke, firewall, extract, assess, GET-only, CLI)
         run: python -m unittest discover -s tests -v
+
+      - name: Offline CLI dry-run smoke
+        env:
+          CODEX_DISPATCHER_DRY_RUN: "true"
+        run: |
+          # allowlist+repo without policies must BLOCK
+          if codex-dispatcher --ticket-file examples/ticket.valid.json --allowlist acme/demo --repository acme/demo; then
+            echo "expected blocked without policies" >&2
+            exit 1
+          fi
+          # demo-eligible path requires explicit --demo-pass-policies
+          codex-dispatcher --ticket-file examples/ticket.valid.json --allowlist acme/demo --repository acme/demo --demo-pass-policies
