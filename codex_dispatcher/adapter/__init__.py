@@ -7,7 +7,6 @@ into the paired-capture namespace.
 
 from __future__ import annotations
 
-from collections.abc import Set
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,7 +54,9 @@ class CodingAgentAdapter:
                 "coding agent adapter is disabled "
                 "(verified_noninteractive=False); no invocation performed"
             )
-        raise AdapterDisabled("coding agent adapter invocation is not implemented")
+        raise AdapterDisabled(
+            "coding agent adapter invocation is not implemented; no invoke performed"
+        )
 
 
 __all__ = [

@@ -23,38 +23,29 @@ class LockPathError(ValueError):
     """Lock path missing, invalid, or colliding with paired-capture namespace."""
 
 
+def canonicalize_lock_path(path: Path | str, *, label: str) -> Path:
+    """Expand ``~``, require absolute, then ``resolve(strict=False)`` once."""
+    if path is None or str(path).strip() == "":
+        raise LockPathError(f"{label} is required (fail closed); inject an explicit path")
+    expanded = Path(path).expanduser()
+    if not expanded.is_absolute():
+        raise LockPathError(f"{label} must be an absolute path: got {path!s}")
+    return expanded.resolve(strict=False)
+
+
 def _is_under(path: Path, root: Path) -> bool:
-    try:
-        path.resolve()
-    except OSError:
-        path = path.absolute()
-    try:
-        resolved_root = root.resolve()
-    except OSError:
-        resolved_root = root.absolute()
-    # Compare lexical + resolved forms so relative tricks cannot sneak in.
-    candidates = {path, Path(path.as_posix()), path.expanduser()}
-    try:
-        candidates.add(path.resolve())
-    except OSError:
-        pass
-    for candidate in candidates:
-        pure = PurePath(candidate.as_posix())
-        root_pure = PurePath(resolved_root.as_posix())
-        if pure == root_pure:
-            return True
-        if root_pure in pure.parents:
-            return True
-        # Also catch string-prefix under /run/lock/copymoney-paired-capture/...
-        prefix = root_pure.as_posix().rstrip("/") + "/"
-        if pure.as_posix() == root_pure.as_posix() or pure.as_posix().startswith(prefix):
-            return True
-    return False
+    """True if *path* is *root* or a descendant. Both args must already be canonical."""
+    path_pure = PurePath(path.as_posix())
+    root_pure = PurePath(root.as_posix())
+    if path_pure == root_pure:
+        return True
+    return root_pure in path_pure.parents
 
 
 def reject_paired_capture_path(path: Path, *, label: str) -> None:
-    """Fail closed if *path* is inside the paired-capture lock directory."""
-    if _is_under(Path(path), PAIRED_CAPTURE_LOCK_ROOT):
+    """Fail closed if canonical *path* is inside the paired-capture lock directory."""
+    root = canonicalize_lock_path(PAIRED_CAPTURE_LOCK_ROOT, label="paired_capture_root")
+    if _is_under(path, root):
         raise LockPathError(
             f"{label} must not use the paired-capture lock namespace "
             f"({PAIRED_CAPTURE_LOCK_ROOT}): got {path}"
@@ -62,12 +53,12 @@ def reject_paired_capture_path(path: Path, *, label: str) -> None:
 
 
 def require_lock_path(path: Path | str | None, *, label: str) -> Path:
-    """Require an explicit lock path and reject paired-capture collisions."""
+    """Canonicalize an explicit lock path and reject paired-capture collisions."""
     if path is None or str(path).strip() == "":
         raise LockPathError(f"{label} is required (fail closed); inject an explicit path")
-    resolved = Path(path)
-    reject_paired_capture_path(resolved, label=label)
-    return resolved
+    canonical = canonicalize_lock_path(path, label=label)
+    reject_paired_capture_path(canonical, label=label)
+    return canonical
 
 
 @dataclass(frozen=True)
@@ -78,26 +69,25 @@ class LockPathConfig:
     implementation_lock: Path
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "global_agent_lock",
-            require_lock_path(self.global_agent_lock, label="global_agent_lock"),
+        global_agent_lock = require_lock_path(
+            self.global_agent_lock, label="global_agent_lock"
         )
-        object.__setattr__(
-            self,
-            "implementation_lock",
-            require_lock_path(self.implementation_lock, label="implementation_lock"),
+        implementation_lock = require_lock_path(
+            self.implementation_lock, label="implementation_lock"
         )
-        if self.global_agent_lock == self.implementation_lock:
+        if global_agent_lock == implementation_lock:
             raise LockPathError(
                 "global_agent_lock and implementation_lock must be distinct paths"
             )
+        object.__setattr__(self, "global_agent_lock", global_agent_lock)
+        object.__setattr__(self, "implementation_lock", implementation_lock)
 
 
 __all__ = [
     "LockPathConfig",
     "LockPathError",
     "PAIRED_CAPTURE_LOCK_ROOT",
+    "canonicalize_lock_path",
     "reject_paired_capture_path",
     "require_lock_path",
 ]

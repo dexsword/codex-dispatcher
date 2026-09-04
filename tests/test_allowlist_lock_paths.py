@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from codex_dispatcher.adapter import AdapterConfig, AdapterDisabled, CodingAgentAdapter
 from codex_dispatcher.allowlist import AllowlistError, require_nonempty_allowlist
@@ -12,6 +15,7 @@ from codex_dispatcher.lock import (
     PAIRED_CAPTURE_LOCK_ROOT,
     LockPathConfig,
     LockPathError,
+    canonicalize_lock_path,
     require_lock_path,
 )
 
@@ -53,6 +57,11 @@ class LockPathInjectionTests(unittest.TestCase):
         with self.assertRaises(LockPathError):
             require_lock_path("  ", label="global_agent_lock")
 
+    def test_relative_path_rejected(self) -> None:
+        with self.assertRaises(LockPathError) as ctx:
+            require_lock_path("relative/agent.lock", label="global_agent_lock")
+        self.assertIn("absolute", str(ctx.exception).lower())
+
     def test_rejects_paired_capture_namespace(self) -> None:
         bad = PAIRED_CAPTURE_LOCK_ROOT / "capture-abc.lock"
         with self.assertRaises(LockPathError) as ctx:
@@ -63,8 +72,26 @@ class LockPathInjectionTests(unittest.TestCase):
         with self.assertRaises(LockPathError):
             require_lock_path(PAIRED_CAPTURE_LOCK_ROOT, label="implementation_lock")
 
+    def test_rejects_paired_capture_via_dotdot(self) -> None:
+        sneaky = Path("/run/lock/copymoney-paired-capture/../copymoney-paired-capture/x.lock")
+        with self.assertRaises(LockPathError) as ctx:
+            require_lock_path(sneaky, label="global_agent_lock")
+        self.assertIn("paired-capture", str(ctx.exception))
+
+    def test_rejects_symlink_into_paired_capture_where_practical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            link = Path(tmp) / "alias.lock"
+            target = PAIRED_CAPTURE_LOCK_ROOT / "capture-from-symlink.lock"
+            try:
+                link.symlink_to(target)
+            except OSError as exc:  # pragma: no cover - platform/fs limits
+                self.skipTest(f"symlink not available: {exc}")
+            # Symlink path itself may be absolute under /tmp; canonicalize follows it.
+            with self.assertRaises(LockPathError) as ctx:
+                require_lock_path(link, label="global_agent_lock")
+            self.assertIn("paired-capture", str(ctx.exception))
+
     def test_no_default_into_paired_capture(self) -> None:
-        # Constructing LockPathConfig with paired-capture paths must fail.
         with self.assertRaises(LockPathError):
             LockPathConfig(
                 global_agent_lock=PAIRED_CAPTURE_LOCK_ROOT / "x.lock",
@@ -76,11 +103,14 @@ class LockPathInjectionTests(unittest.TestCase):
             global_agent_lock=Path("/run/lock/copymoney-agent.lock"),
             implementation_lock=Path("/run/lock/copymoney-agent-implementation.lock"),
         )
-        self.assertEqual(cfg.global_agent_lock, Path("/run/lock/copymoney-agent.lock"))
         self.assertEqual(
-            cfg.implementation_lock,
-            Path("/run/lock/copymoney-agent-implementation.lock"),
+            cfg.global_agent_lock,
+            canonicalize_lock_path(
+                Path("/run/lock/copymoney-agent.lock"), label="global_agent_lock"
+            ),
         )
+        self.assertTrue(cfg.global_agent_lock.is_absolute())
+        self.assertTrue(cfg.implementation_lock.is_absolute())
 
     def test_lock_paths_must_be_distinct(self) -> None:
         with self.assertRaises(LockPathError):
@@ -88,6 +118,14 @@ class LockPathInjectionTests(unittest.TestCase):
                 global_agent_lock=Path("/run/lock/copymoney-agent.lock"),
                 implementation_lock=Path("/run/lock/copymoney-agent.lock"),
             )
+
+    def test_lexically_different_same_canonical_file_rejected(self) -> None:
+        a = Path("/run/lock/copymoney-agent.lock")
+        b = Path("/run/lock/../lock/copymoney-agent.lock")
+        self.assertNotEqual(a.as_posix(), b.as_posix())
+        with self.assertRaises(LockPathError) as ctx:
+            LockPathConfig(global_agent_lock=a, implementation_lock=b)
+        self.assertIn("distinct", str(ctx.exception).lower())
 
 
 class AdapterConfigTests(unittest.TestCase):
@@ -112,7 +150,9 @@ class AdapterConfigTests(unittest.TestCase):
         self.assertIn("dexsword/copymoney", cfg.allowed_repositories)
         self.assertEqual(
             cfg.lock_paths.global_agent_lock,
-            Path("/run/lock/copymoney-agent.lock"),
+            canonicalize_lock_path(
+                Path("/run/lock/copymoney-agent.lock"), label="global_agent_lock"
+            ),
         )
         self.assertFalse(cfg.verified_noninteractive)
 
@@ -125,6 +165,18 @@ class AdapterConfigTests(unittest.TestCase):
         )
         with self.assertRaises(AdapterDisabled):
             adapter.run()
+
+    def test_worf_verified_noninteractive_true_still_no_invoke(self) -> None:
+        adapter = CodingAgentAdapter(
+            AdapterConfig(
+                allowed_repositories=frozenset({"acme/demo"}),
+                lock_paths=self._locks(),
+                verified_noninteractive=True,
+            )
+        )
+        with self.assertRaises(AdapterDisabled) as ctx:
+            adapter.run()
+        self.assertIn("no invoke", str(ctx.exception).lower())
 
 
 if __name__ == "__main__":
