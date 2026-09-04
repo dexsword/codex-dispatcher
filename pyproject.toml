@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-dispatcher"
+version = "0.0.1"
+description = "Inert generic Codex Dispatcher skeleton (dry-run only; no activation)."
+readme = "README.md"
+requires-python = ">=3.10"
+# Zero runtime dependencies by design (Task B).
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/dexsword/codex-dispatcher"
+Source = "https://github.com/dexsword/codex-dispatcher"
+
+[tool.setuptools.packages.find]
+include = ["codex_dispatcher*"]
