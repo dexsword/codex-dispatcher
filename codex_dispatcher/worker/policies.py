@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
+from codex_dispatcher.validation import require_none
+
 
 class TicketValidationError(Exception):
     """Opaque ticket failed an injected validator."""
@@ -21,4 +23,4 @@ class CallableTicketValidator:
         self._fn = fn
 
     def validate(self, ticket: Mapping[str, Any]) -> None:
-        self._fn(ticket)
+        require_none(self._fn(ticket), label="ticket validator")

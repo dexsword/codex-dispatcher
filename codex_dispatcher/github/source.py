@@ -14,6 +14,7 @@ from codex_dispatcher.allowlist import (
     AllowlistError,
     require_nonempty_allowlist,
     require_repository_allowed,
+    require_repository_name,
 )
 
 
@@ -51,8 +52,13 @@ class GitHubIssueSource:
         api_base: str = GITHUB_API_BASE,
         ready_label: str = "ready-for-agent",
     ) -> None:
-        if not re.fullmatch(r"[^/\s]+/[^/\s]+", repository):
+        require_repository_name(repository)
+        # Reject URL delimiters/escapes, not just extra slashes. Do not let an
+        # explicitly allowlisted spelling change the /repos/owner/name route.
+        if not re.fullmatch(r"[^/\s?#%\\]+/[^/\s?#%\\]+", repository):
             raise ValueError("repository must be owner/name")
+        if any(part in {".", ".."} for part in repository.split("/")):
+            raise ValueError("repository must not contain dot path components")
         allowlist = require_nonempty_allowlist(allowed_repositories)
         require_repository_allowed(repository, allowlist)
         if api_base != GITHUB_API_BASE:

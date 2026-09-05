@@ -144,6 +144,65 @@ AST scan over every `.py` under `codex_dispatcher/` fails closed on import roots
 
 ## Develop / CI
 
+### Public input and collaborator contracts
+
+- Ticket extraction accepts one JSON object. Duplicate object keys (including
+  nested and escaped-equivalent keys), `NaN`, `Infinity`, and `-Infinity` are
+  rejected in both raw and fenced tickets before policy evaluation. Other
+  object contents remain opaque; this is not a product schema.
+- Supplied `paths` / `texts` must be non-scalar sequences of strings (for
+  example, lists or tuples). Strings, bytes, mappings, nulls, nested collections,
+  and non-string elements are rejected, never coerced. Omitted keys still mean
+  empty sequences. Explicit empty sequences remain valid structural inputs.
+  The same checks apply to custom safety-surface results and the public
+  rule-policy ticket/diff methods. `patch_text` must be a string even with no
+  action rules configured.
+- Paths cannot contain NUL characters. Remaining normalization is **POSIX
+  lexical**: absolute paths and parent segments are rejected by the rule engine;
+  repeated separators and dot segments normalize before path matching. No
+  backslash reinterpretation, Windows-drive interpretation, percent decoding,
+  Unicode normalization, or filesystem symlink resolution occurs. Empty/dot
+  paths, non-NUL control characters, and trailing separators retain their
+  existing lexical behavior; A–E does not define a filesystem file-only schema.
+- Repository allowlists must be nonempty sets/frozensets of nonempty strings,
+  without whitespace or control characters. Membership is exact, with no case
+  folding or substring matching. `normalize_allowlist` is an explicit helper
+  that trims string entries and removes blanks; it never coerces non-strings.
+  The CLI does not silently normalize allowlist spellings. GitHub issue sources
+  additionally reject URL delimiters/escapes and dot components in `owner/name`
+  identifiers so they cannot change the constructed API route.
+- Duplicate-check methods must return an actual `bool`: `False` permits further
+  assessment; `True` blocks. Other results block, including through the callable
+  adapter. Validators and safety ticket checks must return `None` on success or
+  raise on rejection; non-None returns are contract errors, not an alternate
+  boolean/dictionary decision API.
+- Rule configuration must contain tuples of the declared rule types, string
+  patterns, nonblank rule IDs unique within each family, and integer regex flags.
+  Invalid configuration raises `SafetyViolation` with `CONFIG_INVALID` when
+  constructing `RuleBasedSafetyPolicy`. Empty tuples still provide structural
+  checks only, not a production-safe default.
+
+Malformed public input raises `codex_dispatcher.validation.ValidationError`
+(a `ValueError`) from the shared structural helpers/policy methods; rule matches
+continue to raise `SafetyViolation` with the existing stable codes. `assess`
+blocks input/contract errors and expected collaborator failures
+(`TicketValidationError`, `SafetyViolation`, `ValueError`, `TypeError`, `KeyError`,
+`AttributeError`, `RuntimeError`, `OSError`). Other unexpected exceptions propagate
+without producing eligibility; process-control exceptions are not swallowed.
+Injected components remain trusted code. They still choose product policy;
+A–E is not an arbitrary-plugin sandbox or an execution pipeline.
+
+Both `assess` and the CLI enforce `CODEX_DISPATCHER_DRY_RUN` before calling
+collaborators. Disabled dry-run raises `RuntimeError` from `assess`; the CLI
+prints a structured `refused` result with exit code 2. CLI file/decode failures
+also produce structured refusal with exit 2; extraction failures are `blocked`
+with exit 2. Successful demo eligibility exits 0 and performs no mutation.
+
+Protected-path checks remain diff-only, and assessment still does not invoke
+diff validation. Requiring nonempty candidates, rejecting additional POSIX
+filenames, resolving filesystem containment, and defining actual locking or
+execution behavior require separate contracts beyond these A–E corrections.
+
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
