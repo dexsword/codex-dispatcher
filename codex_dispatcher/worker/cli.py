@@ -177,7 +177,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     try:
         result = run(argv)
-    except RuntimeError as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         result = {
             "mode": "dry-run",
             "disposition": "refused",

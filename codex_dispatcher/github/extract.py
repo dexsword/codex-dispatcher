@@ -9,6 +9,23 @@ from typing import Any
 from codex_dispatcher.schema import require_ticket_object
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str) -> Any:
+    raise ValueError(f"non-JSON numeric constant: {value}")
+
+
+def _load_json(text: str) -> Any:
+    return json.loads(text, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+
+
 def extract_ticket(body: str) -> dict[str, Any]:
     """Extract exactly one JSON object ticket from *body*.
 
@@ -18,7 +35,7 @@ def extract_ticket(body: str) -> dict[str, Any]:
     """
     stripped = body.strip()
     try:
-        value = json.loads(stripped)
+        value = _load_json(stripped)
     except json.JSONDecodeError as raw_error:
         fences = list(re.finditer(r"```(?:json)?\s*(.*?)\s*```", body, re.S | re.I))
         if len(fences) != 1:
@@ -31,7 +48,7 @@ def extract_ticket(body: str) -> dict[str, Any]:
                 "issue body contains ambiguous content outside the JSON ticket"
             )
         try:
-            value = json.loads(fences[0].group(1))
+            value = _load_json(fences[0].group(1))
         except json.JSONDecodeError as exc:
             raise ValueError(f"fenced ticket is malformed JSON: {exc}") from exc
     return require_ticket_object(value)

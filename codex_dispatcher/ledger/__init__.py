@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
+from codex_dispatcher.validation import require_boolean
+
 
 @runtime_checkable
 class DuplicateChecker(Protocol):
@@ -19,7 +21,7 @@ class CallableDuplicateChecker:
         self._fn = fn
 
     def is_duplicate(self, ticket: Mapping[str, Any]) -> bool:
-        return bool(self._fn(ticket))
+        return require_boolean(self._fn(ticket), label="duplicate checker")
 
 
 class MemoryDuplicateChecker:

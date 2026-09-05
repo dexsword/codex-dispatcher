@@ -6,9 +6,14 @@ import os
 from collections.abc import Mapping, Set
 from typing import Any
 
+from codex_dispatcher.allowlist import require_repository_allowed
 from codex_dispatcher.github.source import Issue
 from codex_dispatcher.ledger import DuplicateChecker
 from codex_dispatcher.safety import SafetyPolicy, SafetyViolation, TicketSafetySurface
+from codex_dispatcher.safety.normalize import require_paths
+from codex_dispatcher.validation import (
+    require_boolean, require_mapping, require_none, require_strings,
+)
 from codex_dispatcher.worker.policies import TicketValidationError, TicketValidator
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -80,7 +85,11 @@ def assess(
     Any missing seam fails closed (disposition blocked, never eligible).
     Allowlist must be nonempty and a target repository must be named and listed.
     The dispatcher does not interpret product fields inside *ticket*.
+    Disabled dry-run raises RuntimeError before any collaborator is called.
+    Expected input/contract/collaborator errors block; other exceptions propagate
+    without producing an eligible result.
     """
+    require_dry_run()
     if validate_ticket is None:
         return _blocked(issue, "ticket validation policy is not configured")
     if safety_policy is None:
@@ -91,26 +100,24 @@ def assess(
         return _blocked(issue, "duplicate-check capability is not configured")
     if repository_allowlist is None:
         return _blocked(issue, "repository allowlist is not configured")
-    if len(repository_allowlist) == 0:
-        return _blocked(issue, "repository allowlist is empty")
-    if repository is None or str(repository).strip() == "":
-        return _blocked(issue, "target repository is not supplied")
-    if repository not in repository_allowlist:
-        return _blocked(
-            issue,
-            f"repository is not in the supplied allowlist: {repository}",
-        )
-
     try:
-        validate_ticket.validate(ticket)
-        paths = ticket_safety_surface.paths(ticket)
-        texts = ticket_safety_surface.texts(ticket)
-        safety_policy.require_safe_ticket(paths=paths, texts=texts)
-        if duplicate_check.is_duplicate(ticket):
+        require_repository_allowed(repository, repository_allowlist)
+        ticket = require_mapping(ticket, label="ticket")
+        require_none(validate_ticket.validate(ticket), label="ticket validator")
+        paths = require_paths(ticket_safety_surface.paths(ticket), label="paths")
+        texts = require_strings(ticket_safety_surface.texts(ticket), label="texts")
+        require_none(
+            safety_policy.require_safe_ticket(paths=paths, texts=texts),
+            label="safety policy",
+        )
+        if require_boolean(duplicate_check.is_duplicate(ticket), label="duplicate checker"):
             raise ValueError(
                 "ticket identity already known to duplicate-check; silent repetition refused"
             )
-    except (TicketValidationError, SafetyViolation, ValueError, TypeError, KeyError) as exc:
+    except (
+        TicketValidationError, SafetyViolation, ValueError, TypeError, KeyError,
+        AttributeError, RuntimeError, OSError,
+    ) as exc:
         return _blocked(issue, str(exc))
 
     return _eligible(issue, demo_pass_policies=demo_pass_policies)

@@ -15,8 +15,13 @@ from codex_dispatcher.safety.codes import (
     PATH_PROTECTED,
     PATH_UNEXPECTED,
 )
-from codex_dispatcher.safety.config import ActionRule, PathRule, SafetyRuleConfig
-from codex_dispatcher.safety.normalize import normalize_path
+from codex_dispatcher.safety.config import (
+    ActionRule, PathRule, SafetyRuleConfig, validate_rule_config,
+)
+from codex_dispatcher.safety.normalize import normalize_path, require_paths
+from codex_dispatcher.validation import (
+    ValidationError, require_mapping, require_string, require_strings,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,21 +113,18 @@ class TicketSafetySurface(Protocol):
 class MappingTicketSafetySurface:
     """Synthetic surface: read ``paths`` / ``texts`` keys from a mapping ticket.
 
-    Missing keys yield empty sequences. Neutral field names only — not product
-    CopyMoney ticket fields.
+    Missing keys yield empty sequences. Supplied values must be sequences of
+    strings; null and scalar/nested values are rejected rather than coerced.
+    Neutral field names only — not product CopyMoney ticket fields.
     """
 
     def paths(self, ticket: Mapping[str, Any]) -> Sequence[str]:
-        raw = ticket.get("paths", ())
-        if raw is None:
-            return ()
-        return tuple(str(p) for p in raw)
+        ticket = require_mapping(ticket, label="ticket")
+        return require_paths(ticket.get("paths", ()), label="paths")
 
     def texts(self, ticket: Mapping[str, Any]) -> Sequence[str]:
-        raw = ticket.get("texts", ())
-        if raw is None:
-            return ()
-        return tuple(str(t) for t in raw)
+        ticket = require_mapping(ticket, label="ticket")
+        return require_strings(ticket.get("texts", ()), label="texts")
 
 
 def _compile_path_rules(
@@ -138,7 +140,7 @@ def _compile_path_rules(
             )
         try:
             compiled.append((rule.rule_id, re.compile(rule.pattern, rule.flags)))
-        except re.error as exc:
+        except (re.error, ValueError, OverflowError) as exc:
             raise SafetyViolation.from_codes(
                 (CONFIG_INVALID,),
                 subject=rule.rule_id,
@@ -160,7 +162,7 @@ def _compile_action_rules(
             )
         try:
             compiled.append((rule.rule_id, re.compile(rule.pattern, rule.flags)))
-        except re.error as exc:
+        except (re.error, ValueError, OverflowError) as exc:
             raise SafetyViolation.from_codes(
                 (CONFIG_INVALID,),
                 subject=rule.rule_id,
@@ -175,6 +177,10 @@ class RuleBasedSafetyPolicy:
     __slots__ = ("_config", "_denied", "_protected", "_actions")
 
     def __init__(self, config: SafetyRuleConfig) -> None:
+        try:
+            validate_rule_config(config)
+        except ValidationError as exc:
+            raise SafetyViolation.from_codes((CONFIG_INVALID,), message=str(exc)) from exc
         self._config = config
         self._denied = _compile_path_rules(config.denied_paths)
         self._protected = _compile_path_rules(config.protected_paths)
@@ -190,6 +196,8 @@ class RuleBasedSafetyPolicy:
         paths: Sequence[str],
         texts: Sequence[str],
     ) -> None:
+        paths = require_paths(paths, label="paths")
+        texts = require_strings(texts, label="texts")
         details: list[SafetyViolationDetail] = []
         details.extend(self._check_paths_denied(paths))
         details.extend(self._check_actions(texts))
@@ -203,6 +211,9 @@ class RuleBasedSafetyPolicy:
         changed_paths: Sequence[str],
         patch_text: str,
     ) -> None:
+        declared_paths = require_paths(declared_paths, label="declared_paths")
+        changed_paths = require_paths(changed_paths, label="changed_paths")
+        patch_text = require_string(patch_text, label="patch_text")
         details: list[SafetyViolationDetail] = []
         norm_declared: set[str] = set()
         norm_changed: set[str] = set()
