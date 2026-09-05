@@ -9,6 +9,9 @@ from typing import Any
 from codex_dispatcher.github.source import Issue
 from codex_dispatcher.ledger import DuplicateChecker
 from codex_dispatcher.safety import SafetyPolicy, SafetyViolation, TicketSafetySurface
+from codex_dispatcher.safety.codes import PATH_ESCAPE
+from codex_dispatcher.safety.engine import SafetyViolationDetail
+from codex_dispatcher.safety.normalize import structural_path_errors
 from codex_dispatcher.worker.policies import TicketValidationError, TicketValidator
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
@@ -102,9 +105,23 @@ def assess(
         )
 
     try:
-        validate_ticket.validate(ticket)
+        # Structural repository-path checks run before TicketValidator / SafetyPolicy
+        # so a permissive injected policy cannot make a NUL-bearing path eligible.
         paths = ticket_safety_surface.paths(ticket)
         texts = ticket_safety_surface.texts(ticket)
+        path_errors = structural_path_errors(paths)
+        if path_errors:
+            details = [
+                SafetyViolationDetail(
+                    code=PATH_ESCAPE,
+                    subject=raw,
+                    message=msg,
+                )
+                for raw, msg in path_errors
+            ]
+            raise SafetyViolation.from_details(details)
+
+        validate_ticket.validate(ticket)
         safety_policy.require_safe_ticket(paths=paths, texts=texts)
         if duplicate_check.is_duplicate(ticket):
             raise ValueError(
