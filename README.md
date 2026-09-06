@@ -15,7 +15,8 @@ Port/refactor reusable dry-run orchestration seams out of [`dexsword/copymoney`]
 - **Ledger seam:** read-only duplicate-check interface only (no append / filesystem mutation).
 - **Lock paths are injectable** (Task D) with **no defaults** into `/run/lock/copymoney-paired-capture/`. This package does **not** implement CopyMoney `ProcessLock` semantics.
 - **SecureProcessLock** (Task F1) acquires exactly `agent.lock` and `implementation.lock` under an injected root via dirfd/`openat` (`O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`). The production root `/run/lock/codex-dispatcher/` is provisioned by **OPS1**, not by runtime — F1 must not mkdir/chmod/repair it and must not fall back to `/tmp` or the repository.
-- **CanaryProfile** (Task F2) is a frozen injectable config: allowlist `dexsword/dextech` only, permitted path `canary/DISPATCHER_STATUS.md`, gates default **off**, branch-only (no draft PR). **OPS1 is not F2.** Staging is F3; Codex invoke is F4; full website SafetyRuleConfig fixtures are F5.
+- **CanaryProfile** (Task F2) is a frozen injectable config: allowlist `dexsword/dextech` only, permitted path `canary/DISPATCHER_STATUS.md`, gates default **off**, branch-only (no draft PR). **OPS1 is not F2.**
+- **Staging → trusted publisher** (Task F3) prepares a credential-free staging tree with only `canary/DISPATCHER_STATUS.md`, validates (F2 schema + W7 regular file + realpath + sha256), then hands the same bytes into a trusted worktree with nofollow open/write. `require_canary_branch_ref` runs immediately before every commit/publish/push. Push argv is hard-coded non-force (`[git, push, remote, sha:refs/heads/agent/canary/<validated>]`), `shell=False`, hooks disabled (`core.hooksPath=/dev/null`). Staging APIs must not see `GIT_SSH_COMMAND` / deploy keys. **No Codex invoke (F4).**
 - **No PR #20 / paired-shadow work.** Do not edit `dexsword/copymoney` from this repo’s tasks.
 - **No deploy, secrets, wallets, adapter enablement, or live trading hooks.**
 
@@ -85,7 +86,20 @@ Frozen, injectable DexTech canary configuration. **Gates default off.** The acti
 - **Label:** constant `dispatcher-canary`. Missing/wrong label on the profile fails closed. **Assess must use GitHub issue label metadata, not a ticket JSON `label` field.**
 - **SafetyRuleConfig:** nonempty required at construction (Task E N2). A minimal stub is acceptable here; the full website table is F5.
 
-**Not this packet:** OPS1 provisioning, staging (F3), Codex invoke (F4), full website fixtures (F5), credentials, W9, main-protection, activation, CopyMoney / PR #20.
+**Not this packet:** OPS1 provisioning, Codex invoke (F4), full website fixtures (F5), credentials, W9, main-protection, activation, CopyMoney / PR #20.
+
+## Staging + trusted publisher (Task F3 — no Codex)
+
+Credential-free staging → validate → trusted publisher. Tests use tmp. Failures **retain** staging/worktree (no auto-delete).
+
+- **prepare_staging:** copies only `canary/DISPATCHER_STATUS.md` into an injected staging root. No `.git`. No publisher SSH.
+- **StagingTreeEnumerator:** exact one-file layout. Extras, symlinks, `.git`, hooks, keys, empty, and missing fail closed.
+- **validate / validate_staging:** F2 `validate_status_document` + W7 regular file + realpath containment + sha256.
+- **handoff_to_trusted_worktree:** nofollow write + same-bytes / sha256 equality before commit; abort on mismatch.
+- **commit / publish / push:** each calls `require_canary_branch_ref` first. Sanitized Git env. Hooks disabled. Canonical remote validated. Hard-coded non-force argv list; never `shell=True`; never `--force` / `+` / `--force-with-lease`.
+- **Audit stub:** `changed_paths`, hashes, `git.json` (mock push only).
+
+**Not this packet:** Codex invoke / process-group (F4), full website fixtures (F5), OPS1/WEB0/CANARY1, live push, deploy keys, auto-delete, CopyMoney / PR #20.
 
 Example (library injection — not activation):
 
@@ -150,7 +164,7 @@ codex_dispatcher/
   ledger/   # DuplicateChecker only
   schema/   # opaque ticket object helper
   lock/     # LockPathConfig (Task D) + SecureProcessLock (Task F1; no ProcessLock)
-  canary/   # CanaryProfile + status schema + branch helper (Task F2; config only)
+  canary/   # CanaryProfile (F2) + staging/validate/publisher/audit stub (F3; no Codex)
   adapter/  # AdapterConfig + disabled CodingAgentAdapter
   allowlist.py  # nonempty allowlist helpers
 ```
