@@ -48,6 +48,11 @@ class StatusSchemaError(ValueError):
     """Status file does not match the exact §4.10 schema."""
 
 
+def validate_status_document(text: object) -> dict[str, str]:
+    """F3 name for the F2 §4.10 validator (byte-identical rules)."""
+    return validate_status_file(text)
+
+
 def validate_status_file(text: object) -> dict[str, str]:
     """Accept only the frozen key-value document. Reject extra/missing/fences."""
     if not isinstance(text, str):
