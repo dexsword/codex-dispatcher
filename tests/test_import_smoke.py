@@ -16,6 +16,7 @@ SEAM_MODULES = (
     "codex_dispatcher.adapter",
     "codex_dispatcher.worker",
     "codex_dispatcher.schema",
+    "codex_dispatcher.canary",
 )
 
 
