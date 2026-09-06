@@ -271,6 +271,28 @@ class StgT2ExtrasFailTests(unittest.TestCase):
         self.assertIn("missing", str(ctx2.exception).lower())
         self.assertTrue(empty.exists())
 
+    def test_stg_t2_empty_unexpected_dir_at_root_fails_retained(self) -> None:
+        tmp = _tmp()
+        staging_root, _prepared = _prepare(tmp)
+        evil = staging_root / "evil_empty"
+        evil.mkdir()
+        with self.assertRaises(StagingError) as ctx:
+            StagingTreeEnumerator().enumerate(staging_root)
+        self.assertIn("unexpected directory", str(ctx.exception).lower())
+        self.assertTrue(evil.exists())
+        self.assertTrue((staging_root / PERMITTED_RELATIVE_PATH).exists())
+
+    def test_stg_t2_empty_unexpected_dir_under_canary_fails_retained(self) -> None:
+        tmp = _tmp()
+        staging_root, _prepared = _prepare(tmp)
+        nested = staging_root / "canary" / "nested_empty"
+        nested.mkdir()
+        with self.assertRaises(StagingError) as ctx:
+            StagingTreeEnumerator().enumerate(staging_root)
+        self.assertIn("unexpected directory", str(ctx.exception).lower())
+        self.assertTrue(nested.exists())
+        self.assertTrue((staging_root / PERMITTED_RELATIVE_PATH).exists())
+
 
 class StgT3SymlinkRejectTests(unittest.TestCase):
     """STG-T3: symlinks rejected (W7)."""

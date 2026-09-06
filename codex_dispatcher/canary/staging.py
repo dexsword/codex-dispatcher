@@ -230,8 +230,25 @@ def _reject_name(name: str, *, relative: str) -> None:
         raise StagingError(f"key/pem suffix refused at {relative}")
 
 
+def _is_allowed_staging_directory(relative: str, *, permitted: str) -> bool:
+    """True iff *relative* is a strict prefix of the permitted file path.
+
+    The only allowed directory under the staging root is ``canary/``
+    (prefix of ``canary/DISPATCHER_STATUS.md``). Unexpected empty dirs
+    such as ``evil_empty/`` or ``canary/nested_empty/`` fail closed.
+    """
+    if not isinstance(relative, str) or not relative:
+        return False
+    return permitted.startswith(relative + "/")
+
+
 class StagingTreeEnumerator:
-    """Exact one-file enumeration. Fail closed on extras/symlinks/.git/keys."""
+    """Exact one-file enumeration. Fail closed on extras/symlinks/.git/keys.
+
+    Directories are allowed only when they are a strict prefix of
+    ``canary/DISPATCHER_STATUS.md`` (i.e. ``canary/`` only). Empty
+    unexpected directories fail closed — they are not ignored.
+    """
 
     permitted_relative_path = PERMITTED_RELATIVE_PATH
 
@@ -282,6 +299,14 @@ class StagingTreeEnumerator:
             if is_link:
                 raise StagingError(f"symlink refused: {child_rel}")
             if entry.is_dir(follow_symlinks=False):
+                if not _is_allowed_staging_directory(
+                    child_rel, permitted=self.permitted_relative_path
+                ):
+                    raise StagingError(
+                        f"unexpected directory refused: {child_rel} "
+                        f"(only strict prefixes of {self.permitted_relative_path} "
+                        "are allowed; empty extras fail closed)"
+                    )
                 self._scan(root, relative=child_rel, found=found)
             elif entry.is_file(follow_symlinks=False):
                 try:
