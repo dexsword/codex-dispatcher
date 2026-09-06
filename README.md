@@ -13,7 +13,8 @@ Port/refactor reusable dry-run orchestration seams out of [`dexsword/copymoney`]
 - **Opaque tickets:** after unambiguous JSON-object extraction, eligibility comes only from injected validators/policies.
 - **GitHub GET-only** issue retrieval. No mutation methods. No generic request-method escape hatch.
 - **Ledger seam:** read-only duplicate-check interface only (no append / filesystem mutation).
-- **Lock paths are injectable** (Task D) with **no defaults** into `/run/lock/copymoney-paired-capture/`. This package does **not** implement CopyMoney `ProcessLock` semantics (Task F is Will-gated).
+- **Lock paths are injectable** (Task D) with **no defaults** into `/run/lock/copymoney-paired-capture/`. This package does **not** implement CopyMoney `ProcessLock` semantics.
+- **SecureProcessLock** (Task F1) acquires exactly `agent.lock` and `implementation.lock` under an injected root via dirfd/`openat` (`O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC`). The production root `/run/lock/codex-dispatcher/` is provisioned by **OPS1**, not by runtime — F1 must not mkdir/chmod/repair it and must not fall back to `/tmp` or the repository.
 - **No PR #20 / paired-shadow work.** Do not edit `dexsword/copymoney` from this repo’s tasks.
 - **No deploy, secrets, wallets, adapter enablement, or live trading hooks.**
 
@@ -67,6 +68,7 @@ Do not rely on hardcoded product allowlists. Supply allowlists explicitly. Prefe
 - **Allowlist:** injectable and **nonempty**. Missing/empty allowlist fails closed in `GitHubIssueSource`, `AdapterConfig`, and `assess()`.
 - **No hardcoded** `dexsword/copymoney` inside the generic package — product facades inject their allowlist.
 - **Lock paths:** inject `LockPathConfig(global_agent_lock=..., implementation_lock=...)`. There are **no** built-in defaults. Paths under `/run/lock/copymoney-paired-capture/` are rejected.
+- **SecureProcessLock / SecureLockPair:** inject an OPS1-precreated root (tests use tmp). Basenames are allowlisted (`agent.lock`, `implementation.lock`) and rejected before `openat`. Missing or wrong-mode roots fail closed with `LockConfigurationError`; busy flock is `AlreadyLocked`.
 - **Scotty / ops invariant:** a later CopyMoney facade that wires lock paths must **not** loosen fail-closed lock-path equality (product defaults stay exact; dispatcher must not silently accept alternate paths). Keep dispatcher locks path-disjoint from PR #20 paired-capture locks.
 
 Example (library injection — not activation):
@@ -131,7 +133,7 @@ codex_dispatcher/
   safety/   # SafetyPolicy engine (codes, config, DenyAll, RuleBased, normalize)
   ledger/   # DuplicateChecker only
   schema/   # opaque ticket object helper
-  lock/     # LockPathConfig injection (no ProcessLock semantics)
+  lock/     # LockPathConfig (Task D) + SecureProcessLock (Task F1; no ProcessLock)
   adapter/  # AdapterConfig + disabled CodingAgentAdapter
   allowlist.py  # nonempty allowlist helpers
 ```
