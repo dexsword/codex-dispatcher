@@ -158,6 +158,7 @@ class SecureProcessLock:
         fd: int | None = None
         held_key: tuple[int, int] | None = None
         flocked = False
+        registered = False
         try:
             fd = self._open_lock_fd(dirfd)
             st = os.fstat(fd)
@@ -168,6 +169,7 @@ class SecureProcessLock:
                 self._flock_exclusive_nonblocking(fd)
                 flocked = True
                 _HELD_INODES.add(held_key)
+                registered = True
             self._write_payload_after_flock(fd)
             self._dirfd = dirfd
             self._fd = fd
@@ -175,7 +177,7 @@ class SecureProcessLock:
             self._acquired = True
             return self
         except Exception:
-            if held_key is not None:
+            if registered and held_key is not None:
                 with _HELD_GUARD:
                     _HELD_INODES.discard(held_key)
             if fd is not None:

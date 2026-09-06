@@ -38,6 +38,7 @@ from codex_dispatcher.lock import (
     reject_paired_capture_path,
     require_allowed_lock_basename,
 )
+from codex_dispatcher.lock.secure import _HELD_INODES
 from tests.test_dependency_firewall import scan_package
 
 
@@ -167,6 +168,27 @@ class SplT2SecondAcquireTests(unittest.TestCase):
         second = SecureProcessLock(path, job_id="b")
         with self.assertRaises(AlreadyLocked):
             second.acquire()
+
+    def test_spl_t2_failed_second_acquire_does_not_clear_holder_guard(self) -> None:
+        """Worf: AlreadyLocked on 2nd acquire must not discard the holder's inode."""
+        tmp = _ops1_root()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / AGENT_LOCK_BASENAME
+        first = SecureProcessLock(path, job_id="a")
+        first.acquire()
+        self.addCleanup(first.release)
+        second = SecureProcessLock(path, job_id="b")
+        with self.assertRaises(AlreadyLocked):
+            second.acquire()
+        self.assertTrue(first.acquired)
+        assert first.lock_fd is not None
+        holder_st = os.fstat(first.lock_fd)
+        self.assertIn((holder_st.st_dev, holder_st.st_ino), _HELD_INODES)
+        third = SecureProcessLock(path, job_id="c")
+        with self.assertRaises(AlreadyLocked):
+            third.acquire()
+        self.assertTrue(first.acquired)
+        self.assertIn((holder_st.st_dev, holder_st.st_ino), _HELD_INODES)
 
     def test_spl_t2_second_acquire_cross_process_already_locked(self) -> None:
         tmp = _ops1_root()
